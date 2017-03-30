@@ -126,4 +126,3 @@ void updateData() {
   memset(buf, '\0', bufferSize);
   delay(1000); //some small delay!
 }
-
