@@ -1,51 +1,58 @@
+
 #include <Ethernet.h>
 #include <Timer.h>
 
 EthernetClient client;
-
-// network information
-byte mac[] = {0x98, 0x4F, 0xEE, 0x00, 0x81, 0x54};
-IPAddress ip(172, 16, 0, 100);
-
-IPAddress server(160, 98, 61, 150);
-
-/** InfluxDB HTTP port */
-const int eth_port = 8086;
-
-/** Size of the buffer for HTTP content */
-const int bufferSize = 2048;
-
-/** An character array filled with null terminate chars */
-char buf[bufferSize] = {'\0'};
-
-/* Sensor */
-int temperature_sensor = 1;
-int luminosity_sensor = 0;
-
-// Temperature info for computation
-int a;
-float temperature;
-int B = 3975;
-float resistance;
-
-/* TIMER */
-int timerAction;
 Timer timer;
 
-void setup() {
-  Serial.begin(115200);
-  delay(1000);
-  connectToInflux();
-  timerAction = timer.every(100, updateData); // each second call
-}
+const int bufferSize = 2048;
+char buf[bufferSize] = {'\0'};
 
-void loop() {
-  timer.update();
-}
 
+IPAddress influxdb_ip(160,98,61,150);
+const int influxdb_port = 8086;
+const char* influxdb_database_name = "example";
+const char* influxdb_database_name_eth = "example,";
+         
+IPAddress arduino1_ip(172,16,0,100);
+byte arduino1_mac[] {0x98,0x4F,0xEE,0x00,0x81,0x54};
+         int temp_pin = 1;
+int lum_pin = 0;
+
+float tf (int x)
+  {
+  const int B = 3975;
+const float resistance = (((float)(1023 - x) * 1000) / x);
+const float temperature = ((1 / ((log((resistance / 1000)) / B) + (1 / 298.15))) - 273.15);
+return temperature;
+}
+       
+void send_temp() {
+  int rawData = analogRead(temp_pin);
+  float data = tf(rawData);
+  int numChars = 0;
+  numChars = sprintf(buf,influxdb_database_name_eth);
+  numChars += sprintf(&buf[numChars],"SOURCE=arduino1 ");
+  numChars += sprintf(&buf[numChars],"temp=%d,");
+  sendData(buf,numChars);
+  memset(buf,'\0',bufferSize);
+  // delay(1000); // some small delay
+}
+             
+void send_lum() {
+  int data = analogRead(lum_pin);
+  int numChars = 0;
+  numChars = sprintf(buf,influxdb_database_name_eth);
+  numChars += sprintf(&buf[numChars],"SOURCE=arduino1 ");
+  numChars += sprintf(&buf[numChars],"lum=%d,");
+  sendData(buf,numChars);
+  memset(buf,'\0',bufferSize);
+  // delay(1000); // some small delay
+}
+             
 void sendData(char* data, int dataSize) {
   //first we need to connect to InfluxDB server
-  int conState = client.connect(server, eth_port);
+  int conState = client.connect(influxdb_ip, influxdb_port);
 
   if (conState <= 0) { //check if connection to server is stablished
     Serial.print("Could not connect to InfluxDB Server, Error #");
@@ -77,16 +84,16 @@ void sendData(char* data, int dataSize) {
 }
 
 void connectToInflux() {
-  if (Ethernet.begin(mac) == 0) {
+  if (Ethernet.begin(arduino1_mac) == 0) {
     Serial.println("Failed to configure Ethernet using DHCP");
     // no point in carrying on, so do nothing forevermore:
     // try to congifure using IP address instead of DHCP:
-    Ethernet.begin(mac, ip);
+    Ethernet.begin(arduino1_mac, arduino1_ip);
   }
   delay(2000); // give time to allow connection
 
   //do a fast test if we can connect to server
-  int conState = client.connect(server, eth_port);
+  int conState = client.connect(influxdb_ip, influxdb_port);
 
   if (conState > 0) {
     Serial.println("Connected to InfluxDB server");
@@ -97,32 +104,16 @@ void connectToInflux() {
   Serial.print("Could not connect to InfluxDB Server, Error #");
   Serial.println(conState);
 }
+     
 
-void updateData() {
-  // get temperature
-  a = analogRead(temperature_sensor);
-  resistance = (float)(1023 - a) * 10000 / a;
-  temperature = 1 / (log(resistance / 10000) / B + 1 / 298.15) - 273.15;
-  // get light
-  int luminosity = analogRead(luminosity_sensor);
+void setup() {
+  timer.every(1000,send_temp);
+timer.every(1000,send_lum);
 
-  int numChars = 0;
-
-  // measurement name
-  numChars = sprintf(buf, "arduino-sensor,");
-
-  // tag with space at the end
-  numChars += sprintf(&buf[numChars], "SOURCE=arduino_1 ");
-
-  // field
-  numChars += sprintf(&buf[numChars], "temp=%f,", temperature);
-  numChars += sprintf(&buf[numChars], "light=%d", luminosity);
-
-  //Print the buffer on the serial line to see how it looks
-  Serial.print("Sending following dataset to InfluxDB: ");
-  Serial.println(buf);
-
-  sendData(buf, numChars);
-  memset(buf, '\0', bufferSize);
-  delay(1000); //some small delay!
 }
+
+void loop() {
+  timer.update();
+
+}
+     
